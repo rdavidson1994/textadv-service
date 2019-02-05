@@ -8,7 +8,7 @@ var inputAccepted = false;
 
 function acceptInput() {
     inputAccepted = true;
-    $("#enter-button").prop("disabled", false)
+    $(".game-button").prop("disabled", false)
 }
 
 async function apiPost(url, data) {
@@ -24,17 +24,30 @@ async function apiPost(url, data) {
     return response //JSON.parse(response)
 }
 
-async function validateProcess(processId) {
-    var response = await apiPost("/ValidateProcess",
-        {
-            processId: processId
-        }
-    );
-    console.log(`ProcessId is valid: ${response.valid}`)
-    return response.valid;
+async function apiCall(method, url, data) {
+    data = data || {};
+    var response = await $.ajax({
+        type: method,
+        contentType: "application/json; charset=utf-8",
+        url: url,
+        data: JSON.stringify(data),
+        dataType: "json"
+    });
+    console.log(`Got this response : ${JSON.stringify(response)}`)
+    return response //JSON.parse(response)
 }
 
-async function pollOutput(processId) {
+/*async function validateProcess(gameId) {
+    var response = await apiPost("/ValidateProcess",
+        {
+            gameId: gameId
+        }
+    );
+    console.log(`gameId is valid: ${response.valid}`)
+    return response.valid;
+}*/
+
+async function pollOutput(outputLocation) {
     var inProgress = true;
     var waitTime = 250
     while (inProgress) {
@@ -42,9 +55,7 @@ async function pollOutput(processId) {
         await timeout(waitTime);
         waitTime += 500;
         console.log("Polling for output")
-        results = await apiPost("/OutputPoll",
-            { processId: processId }
-        );
+        results = await apiCall("GET", outputLocation);
         if (results.text) {
             updateLog(results.text);
             inProgress = false;
@@ -53,22 +64,23 @@ async function pollOutput(processId) {
     return;
 }
 
-async function createProcess() {
-    var response = await apiPost("/NewProcess");
-    localStorage.setItem("processId", response.processId);
-    await pollOutput(response.processId);
+async function createGame() {
+    var response = await apiCall("POST", "/Games");
+    sessionStorage.setItem("gameId", response.gameId);
+    await pollOutput(response.outputLocation);
 }
 
-async function handleInput(inputText, processId) {
+
+
+async function handleInput(inputText, gameId) {
     updateLog(">" + inputText)
-    var result = await apiPost("/TextInput",
+    var result = await apiCall("POST", `/Games/${gameId}/Inputs`,
         {
             inputText: inputText,
-            processId: processId
         },
     );
-    if (result.inProgress) {
-        pollOutput(processId);
+    if (result.outputLocation) {
+        pollOutput(result.outputLocation);
     }
 }
 
@@ -82,25 +94,38 @@ function updateLog(newText) {
 
 function clearAndSend() {
     if (inputAccepted) {
-        var processId = localStorage.getItem("processId")
-        handleInput($("#input-box").val(), processId);
+        var gameId = sessionStorage.getItem("gameId")
+        handleInput($("#input-box").val(), gameId);
         $("#input-box").val("");
     }
     $("#input-box").focus();
 }
 
-async function connectToProcess() {
-    var processId = localStorage.getItem("processId")
-    if (processId === null) {
-        console.log("No processId found, asking the server to start a new game.");
-        await createProcess()
-    } else {
-        valid = await validateProcess(processId)
-        if (!valid) {
-            console.log("Expired process, creating new one.")
-            await createProcess()
+function saveGame() {
+    if (inputAccepted) {
+        var gameId = sessionStorage.getItem("gameId")
+        if (!gameId) {
+            console.log("WARNING: No gameId in local storage but input accepted");
+        } else {
+            apiCall("POST", `/Saves`, { gameId: gameId })
         }
     }
+}
+
+async function connectToProcess() {
+    var gameId = sessionStorage.getItem("gameId")
+    if (gameId === null) {
+        console.log("No gameId found, asking the server to start a new game.");
+        await createGame()
+    } else {
+        console.log("Found gameId, using it")
+    }/*else {
+        valid = await validateProcess(gameId)
+        if (!valid) {
+            console.log("Expired process, creating new one.")
+            await createGame()
+        }
+    }*/
     acceptInput();
 }
 
@@ -122,16 +147,16 @@ $(document).on("click", function (event) {
     dropdownToOpen.addClass("show");
 
     if (target.is(".dropdown-option")) {
-        processId = localStorage.getItem("processId")
-        if (processId) {
-            //If a dropdown option is clicked, sent it's text to the console
-            handleInput(target.data("text"), processId);
+        gameId = sessionStorage.getItem("gameId")
+        if (gameId) {
+            //If a dropdown option is clicked, send its text to the console
+            handleInput(target.data("text"), gameId);
         }
     }
 });
 
 $("#enter-button").click(clearAndSend);
-
+$("#save-button").click(saveGame);
 $(document).keyup(function (event) {
     if (event.which === 13) {
         clearAndSend();
