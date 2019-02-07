@@ -37,16 +37,6 @@ async function apiCall(method, url, data) {
     return response //JSON.parse(response)
 }
 
-/*async function validateProcess(gameId) {
-    var response = await apiPost("/ValidateProcess",
-        {
-            gameId: gameId
-        }
-    );
-    console.log(`gameId is valid: ${response.valid}`)
-    return response.valid;
-}*/
-
 async function pollOutput(outputLocation) {
     var inProgress = true;
     var waitTime = 250
@@ -69,8 +59,6 @@ async function createGame() {
     sessionStorage.setItem("gameId", response.gameId);
     await pollOutput(response.outputLocation);
 }
-
-
 
 async function handleInput(inputText, gameId) {
     updateLog(">" + inputText)
@@ -119,19 +107,19 @@ async function connectToProcess() {
         await createGame()
     } else {
         console.log("Found gameId, using it")
-    }/*else {
-        valid = await validateProcess(gameId)
-        if (!valid) {
-            console.log("Expired process, creating new one.")
+        let game = await apiCall("GET", `/Games/${gameId}`)
+        if (!game.running) {
+            console.log("Game expired, creating new")
             await createGame()
         }
-    }*/
+    }
     acceptInput();
 }
 
 
 $(document).on("click", function (event) {
     target = $(event.target);
+
     var dropdownToOpen = $(); //Empty set
     //By default, all dropdowns close on any click
 
@@ -140,9 +128,12 @@ $(document).on("click", function (event) {
         if (!siblingMenu.hasClass("show")) {
             //But if the link of a closed dropdown is clicked, open that one only
             dropdownToOpen = siblingMenu;
+            dropdownToOpen.css({
+                "left": target.offset().left,
+                "top": target.offset().top + target.outerHeight(true)
+            })
         }
     }
-
     $(".show").removeClass("show");
     dropdownToOpen.addClass("show");
 
@@ -153,6 +144,7 @@ $(document).on("click", function (event) {
             handleInput(target.data("text"), gameId);
         }
     }
+
 });
 
 $("#enter-button").click(clearAndSend);
