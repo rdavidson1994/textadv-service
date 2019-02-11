@@ -1,5 +1,9 @@
 /*jshint esversion: 6*/
 /*jshint node: true*/
+const { promisify } = require("util");
+const fs = require("fs");
+const hogan = require("hogan.js");
+const mustache = require("mustache");
 const express = require("express");
 const path = require("path");
 const uuidv4 = require("uuid/v4");
@@ -7,8 +11,12 @@ const bodyParser = require("body-parser");
 const { spawn } = require("child_process");
 var read = require("read-yaml");
 var config = read.sync("config.yml");
-
 const app = express();
+
+const dropdownTemplate = hogan.compile(
+    fs.readFileSync("dropdown-template.mustache", "utf-8")
+);
+
 function publicAsset(string) {
     return path.join(__dirname, "public", string);
 }
@@ -37,26 +45,41 @@ function gameFactory(gameId, saveId) {
     }
     let game = {
         gameId: gameId,
+        maxOutput: 0,
         outputs: [],
         partialOutputs: [],
         running: true,
         awaitingOutput: true,
         process: spawn("py", pyArgs)
     };
-    game.process.stdout.on("data", function (data) {
+    game.process.stdout.on("data", async function (data) {
         let text = data.toString();
         debugLog(`Text from process: ${text}`);
-        let lines = text.split("\r\n");
-        lines.forEach(function (line) {
+        let lines = text.split("\n");
+        for (line of lines) {
             if (line.startsWith("{")) {
                 debugLog("Found JSON, parsing");
                 let jsonData = JSON.parse(line);
-                game.handleGameSignal(jsonData);
+                if (jsonData.type === "output complete") {
+                    debugLog(`Got a push message from process. Outputs: ${game.partialOutputs}`)
+                    let completeOutput = await Promise.all(game.partialOutputs);
+                    debugLog(`Pushing these outputs ${completeOutput}`)
+                    game.outputs.push(completeOutput.join(""));
+                    game.partialOutputs = [];
+                    if (jsonData.gameOver) {
+                        game.running = false;
+                    }
+                } else {
+                    game.partialOutputs.push(
+                        //This pushes a Promise in.
+                        game.handleGameSignal(jsonData)
+                    );
+                }
                 //JSON data is meant for the server, and is not user-facing output
             } else {
                 game.partialOutputs.push(line);
             }
-        });
+        }
     });
     game.process.stderr.on("data", function (data) {
         debugLog(`Error from process: ${data}`);
@@ -69,21 +92,25 @@ function gameFactory(gameId, saveId) {
     game.writeLine = function (inputText) {
         game.process.stdin.write(inputText + "\n");
     };
-    game.handleGameSignal = function (jsonData) {
-        if (jsonData.type === "save") {
+    game.handleGameSignal = async function (jsonData) {
+        let type = jsonData.type;
+        if (type === "save") {
             debugLog("Save recorded");
             saveId = jsonData.saveId;
             saves[saveId] = saveFactory(saveId);
-        } else if (jsonData.type === "output complete") {
-            game.outputs.push(game.partialOutputs.join(""));
-            game.partialOutputs = [];
-            if (jsonData.gameOver) {
-                game.running = false;
-            }
+            return ""
+        } else if (type === "dropdown") {
+            debugLog("found a dropdown");
+            //let template = await readFile("dropdown-template.mustache", "utf-8");
+            debugLog("trying to render mustache template...");
+            //let output = mustache.render(template, jsonData);
+            debugLog("...template rendered, added.");
+            return dropdownTemplate.render(jsonData);//output;
         }
-    };
+    }
     return game;
-}
+};
+
 
 app.use("/static", express.static(path.join(__dirname, "public")));
 app.use(bodyParser.json());
@@ -142,8 +169,8 @@ app.get("/Games/:gameId/Outputs/:outputId", function (req, res) {
     let index = req.params.outputId;
     debugLog(`Looking for this output index ${index}`);
     let output = req.game.outputs[index];
-    if (!output) {
-        if (index === req.game.nextOutput()) {
+    if (output === undefined) {
+        if (index <= req.game.maxOutput) {
             res.json({
                 status: "in progress"
             });
@@ -168,11 +195,12 @@ app.get("/Games/:gameId/Outputs", function (req, res) {
 
 app.post("/Games/:gameId/Inputs", function (req, res) {
     debugLog(`received the following input request: ${JSON.stringify(req.body)}`);
-    let outputIndex = req.game.nextOutput();
+    req.game.maxOutput += 1;
+    /*let outputIndex = req.game.nextOutput();*/
     let inputText = req.body.inputText.replace(/[^a-zA-Z0-9 ]/g, "");
     req.game.writeLine(inputText);
     res.json({
-        outputLocation: `/Games/${req.game.gameId}/Outputs/${outputIndex}`
+        outputLocation: `/Games/${req.game.gameId}/Outputs/${req.game.maxOutput}`
     });
 
 });
@@ -184,7 +212,8 @@ app.post("/Saves", function (req, res) {
         res.send("Game not found");
     }
     game.writeLine("<<save>>");
-    res.send();
+    res.status(200);
+    res.send("OK")
 });
 
 app.get("/Saves", function (req, res) {
