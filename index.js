@@ -10,6 +10,7 @@ const uuidv4 = require("uuid/v4");
 const bodyParser = require("body-parser");
 const { spawn } = require("child_process");
 var read = require("read-yaml");
+const { json } = require("body-parser");
 var config = read.sync("config.yml");
 const app = express();
 
@@ -39,7 +40,7 @@ function saveFactory(saveId) {
 }
 
 function gameFactory(gameId, saveId) {
-    let pyArgs = ["C:\\Users\\Rl\\Desktop\\textadv\\entrypoint.py", "-web"];
+    let pyArgs = [config.scriptPath, "--web"];
     if (saveId) {
         pyArgs.push(`--save=${saveId}`);
     }
@@ -56,29 +57,28 @@ function gameFactory(gameId, saveId) {
         let text = data.toString();
         debugLog(`Text from process: ${text}`);
         let lines = text.split("\n");
-        for (line of lines) {
-            if (line.startsWith("{")) {
-                debugLog("Found JSON, parsing");
-                let jsonData = JSON.parse(line);
-                if (jsonData.type === "output complete") {
-                    debugLog(`Got a push message from process. Outputs: ${game.partialOutputs}`)
-                    let completeOutput = await Promise.all(game.partialOutputs);
-                    debugLog(`Pushing these outputs ${completeOutput}`)
-                    game.outputs.push(completeOutput.join(""));
-                    game.partialOutputs = [];
-                    if (jsonData.gameOver) {
-                        game.running = false;
-                    }
-                } else {
-                    game.partialOutputs.push(
-                        //This pushes a Promise in.
-                        game.handleGameSignal(jsonData)
-                    );
-                }
-                //JSON data is meant for the server, and is not user-facing output
-            } else {
+        for (let line of lines) {
+            let jsonData = JSON.parse(line);
+            if (typeof jsonData === "string") {
                 game.partialOutputs.push(line);
             }
+            else if (jsonData.type === "output complete") {
+                debugLog(`Got a push message from process. Outputs: ${game.partialOutputs}`)
+                let completeOutput = await Promise.all(game.partialOutputs);
+                debugLog(`Pushing these outputs ${completeOutput}`)
+                game.outputs.push(completeOutput.join(""));
+                game.partialOutputs = [];
+                if (jsonData.gameOver) {
+                    game.running = false;
+                }
+            } else {
+                game.partialOutputs.push(
+                    //This pushes a Promise in.
+                    game.handleGameSignal(jsonData)
+                );
+            }
+            //JSON data is meant for the server, and is not user-facing output
+            
         }
     });
     game.process.stderr.on("data", function (data) {
