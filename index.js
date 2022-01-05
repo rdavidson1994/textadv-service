@@ -1,6 +1,6 @@
 /*jshint esversion: 6*/
 /*jshint node: true*/
-const { promisify } = require("util");
+const { promisify, isNull } = require("util");
 const fs = require("fs");
 const hogan = require("hogan.js");
 const mustache = require("mustache");
@@ -55,6 +55,10 @@ function gameFactory(gameId, saveId) {
     };
     game.process.stdout.on("readable", async function () {
         let buffer = this.read();
+        if (buffer == null) {
+            game.running = false;
+            return;
+        }
         let text = buffer.toString();
         debugLog(`Text from process: ${text}`);
         let lines = text.replace(/\r/g,"").split("\n");
@@ -173,7 +177,7 @@ app.get("/Games/:gameId/Outputs/:outputId", function (req, res) {
     debugLog(`Looking for this output index ${index}`);
     let output = req.game.outputs[index];
     if (output === undefined) {
-        if (index <= req.game.maxOutput) {
+        if (index <= req.game.maxOutput && req.game.running) {
             res.json({
                 status: "in progress"
             });
