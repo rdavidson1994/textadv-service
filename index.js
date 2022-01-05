@@ -53,19 +53,24 @@ function gameFactory(gameId, saveId) {
         awaitingOutput: true,
         process: spawn("py", pyArgs)
     };
-    game.process.stdout.on("data", async function (data) {
-        let text = data.toString();
+    game.process.stdout.on("readable", async function () {
+        let buffer = this.read();
+        let text = buffer.toString();
         debugLog(`Text from process: ${text}`);
-        let lines = text.split("\n");
+        let lines = text.replace(/\r/g,"").split("\n");
         for (let line of lines) {
+            if (line.length === 0) {
+                debugLog("Read empty line from process");
+                continue;
+            }
+
             let jsonData = JSON.parse(line);
             if (typeof jsonData === "string") {
-                game.partialOutputs.push(line);
-            }
-            else if (jsonData.type === "output complete") {
-                debugLog(`Got a push message from process. Outputs: ${game.partialOutputs}`)
+                let webString = jsonData.replace(/\n/g,"<br>")
+                game.partialOutputs.push(webString);
+            } else if (jsonData.type === "output complete") {
                 let completeOutput = await Promise.all(game.partialOutputs);
-                debugLog(`Pushing these outputs ${completeOutput}`)
+                debugLog(`Pushing these outputs: ${completeOutput}`)
                 game.outputs.push(completeOutput.join(""));
                 game.partialOutputs = [];
                 if (jsonData.gameOver) {
@@ -76,9 +81,7 @@ function gameFactory(gameId, saveId) {
                     //This pushes a Promise in.
                     game.handleGameSignal(jsonData)
                 );
-            }
-            //JSON data is meant for the server, and is not user-facing output
-            
+            }            
         }
     });
     game.process.stderr.on("data", function (data) {

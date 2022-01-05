@@ -61,7 +61,7 @@ async function createGame() {
 }
 
 async function handleInput(inputText, gameId) {
-    updateLog(">" + inputText)
+    updateLog(">" + inputText + "<br>")
     var result = await apiCall("POST", `/Games/${gameId}/Inputs`,
         {
             inputText: inputText,
@@ -75,7 +75,7 @@ async function handleInput(inputText, gameId) {
 
 function updateLog(newText) {
     oldText = $("#output_text").html()
-    $("#output_text").html(oldText + "<br />" + newText)
+    $("#output_text").html(oldText + newText)
     maxScroll = $("#log_text").prop("scrollHeight");
     $("#log_text").scrollTop(maxScroll);
 }
